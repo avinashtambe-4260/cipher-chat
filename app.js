@@ -58,11 +58,12 @@
   }
 
   function getClientId() {
+    // Per-tab id so two people testing in the same browser still see each other's mail
     try {
-      let id = localStorage.getItem(CLIENT_KEY);
+      let id = sessionStorage.getItem(CLIENT_KEY);
       if (!id) {
         id = "c-" + uuid();
-        localStorage.setItem(CLIENT_KEY, id);
+        sessionStorage.setItem(CLIENT_KEY, id);
       }
       return id;
     } catch (_) {

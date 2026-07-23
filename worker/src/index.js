@@ -1,6 +1,8 @@
 ﻿/**
- * Cipher mailbox Worker — stores encrypted messages in KV until peer ACKs.
+ * Cipher mailbox Worker — single inbox document per room (avoids KV list lag).
+ * Only ciphertext is stored; deleted after ACK. TTL 24h.
  */
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -15,7 +17,11 @@ const MAX_MESSAGES = 100;
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...CORS,
+    },
   });
 }
 
@@ -31,6 +37,10 @@ function badRequest(msg) {
   return json({ error: msg }, 400);
 }
 
+function inboxKey(roomHash) {
+  return `room:${roomHash}:inbox`;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -42,7 +52,7 @@ export default {
     if (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
 
     if (path === "/api/health" && request.method === "GET") {
-      return json({ ok: true });
+      return json({ ok: true, storage: "inbox-v2" });
     }
 
     const roomMatch = path.match(/^\/api\/room\/([^/]+)\/(messages|ack)$/);
@@ -70,6 +80,28 @@ export default {
     return notFound();
   },
 };
+
+async function readInbox(env, roomHash) {
+  const raw = await env.MAILBOX.get(inboxKey(roomHash));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeInbox(env, roomHash, messages) {
+  const key = inboxKey(roomHash);
+  if (!messages.length) {
+    await env.MAILBOX.delete(key);
+    return;
+  }
+  await env.MAILBOX.put(key, JSON.stringify(messages), {
+    expirationTtl: MSG_TTL,
+  });
+}
 
 async function postMessage(request, env, roomHash) {
   const contentLength = request.headers.get("content-length");
@@ -101,41 +133,39 @@ async function postMessage(request, env, roomHash) {
   if (typeof iv !== "string" || typeof ct !== "string" || typeof from !== "string") {
     return badRequest("iv, ct, from must be strings");
   }
-  if (ts !== undefined && typeof ts !== "number" && typeof ts !== "string") {
-    return badRequest("invalid ts");
-  }
 
-  const value = JSON.stringify({ id, iv, ct, from, ts });
-  if (value.length > MAX_BODY) {
-    return badRequest("body too large");
-  }
+  const entry = {
+    id,
+    iv,
+    ct,
+    from,
+    ts: ts == null ? Date.now() : ts,
+  };
 
-  const key = `room:${roomHash}:msg:${id}`;
-  await env.MAILBOX.put(key, value, { expirationTtl: MSG_TTL });
-  return json({ ok: true });
-}
-
-async function listMessages(env, roomHash) {
-  const prefix = `room:${roomHash}:msg:`;
-  const listed = await env.MAILBOX.list({ prefix, limit: MAX_MESSAGES });
-  const messages = [];
-
-  for (const key of listed.keys) {
-    const val = await env.MAILBOX.get(key.name);
-    if (val == null) continue;
-    try {
-      messages.push(JSON.parse(val));
-    } catch {
-      // skip corrupt
+  // Retry read-modify-write so concurrent posts rarely clobber each other
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await readInbox(env, roomHash);
+    if (current.some((m) => m && m.id === id)) {
+      return json({ ok: true, duplicate: true });
+    }
+    const next = current.concat([entry]).slice(-MAX_MESSAGES);
+    await writeInbox(env, roomHash, next);
+    const verify = await readInbox(env, roomHash);
+    if (verify.some((m) => m && m.id === id)) {
+      return json({ ok: true });
     }
   }
 
+  return json({ error: "could not persist message" }, 503);
+}
+
+async function listMessages(env, roomHash) {
+  const messages = await readInbox(env, roomHash);
   messages.sort((a, b) => {
-    const ta = Number(a.ts) || 0;
-    const tb = Number(b.ts) || 0;
+    const ta = Number(a && a.ts) || 0;
+    const tb = Number(b && b.ts) || 0;
     return ta - tb;
   });
-
   return json({ messages });
 }
 
@@ -147,18 +177,29 @@ async function ackMessages(request, env, roomHash) {
     return badRequest("invalid JSON");
   }
 
-  const ids = body?.ids;
+  const ids = body && body.ids;
   if (!Array.isArray(ids)) {
     return badRequest("ids must be an array");
   }
 
-  let deleted = 0;
-  for (const id of ids) {
-    if (typeof id !== "string" || id.length === 0) continue;
-    const key = `room:${roomHash}:msg:${id}`;
-    await env.MAILBOX.delete(key);
-    deleted += 1;
+  const idSet = new Set(
+    ids.filter((id) => typeof id === "string" && id.length > 0)
+  );
+  if (!idSet.size) {
+    return json({ ok: true, deleted: 0 });
   }
 
-  return json({ ok: true, deleted });
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await readInbox(env, roomHash);
+    const next = current.filter((m) => m && !idSet.has(m.id));
+    const deleted = current.length - next.length;
+    await writeInbox(env, roomHash, next);
+    const verify = await readInbox(env, roomHash);
+    const stillThere = verify.some((m) => m && idSet.has(m.id));
+    if (!stillThere) {
+      return json({ ok: true, deleted });
+    }
+  }
+
+  return json({ ok: true, deleted: 0, warning: "ack may still be propagating" });
 }
