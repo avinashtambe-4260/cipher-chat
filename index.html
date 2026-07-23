@@ -1,0 +1,84 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Cipher — secret peer-to-peer chat. Same code, same room. Messages stay encrypted end to end." />
+  <title>Cipher — Secret Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <main id="main" class="shell">
+    <!-- Gate -->
+    <section id="gate" class="gate" aria-labelledby="brand">
+      <header class="gate-header">
+        <p class="brand" id="brand">Cipher</p>
+        <h1 class="tagline">Secret chat. Same code, same room.</h1>
+        <p class="lede">Enter a shared code. Messages are encrypted on your device before they leave.</p>
+      </header>
+
+      <form id="join-form" class="join-form" autocomplete="off">
+        <div class="field">
+          <label for="room-code">Shared chat code</label>
+          <input
+            id="room-code"
+            name="room-code"
+            type="text"
+            inputmode="text"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            minlength="3"
+            required
+            placeholder="e.g. maple-dusk"
+            aria-describedby="code-hint"
+          />
+          <p id="code-hint" class="hint">At least 3 characters. Spaces become hyphens.</p>
+        </div>
+        <p id="gate-error" class="error" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary" id="join-btn">Enter room</button>
+      </form>
+    </section>
+
+    <!-- Chat -->
+    <section id="chat" class="chat" hidden aria-labelledby="chat-title">
+      <header class="chat-header">
+        <div class="chat-header-text">
+          <p class="brand brand-sm">Cipher</p>
+          <h2 id="chat-title" class="room-label">Room</h2>
+        </div>
+        <div class="chat-meta">
+          <p id="status" class="status" role="status" aria-live="polite">Connecting…</p>
+          <button type="button" class="btn btn-ghost" id="leave-btn">Leave</button>
+        </div>
+      </header>
+
+      <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Chat messages"></div>
+
+      <form id="send-form" class="send-form" autocomplete="off">
+        <label class="visually-hidden" for="message-input">Message</label>
+        <input
+          id="message-input"
+          name="message"
+          type="text"
+          maxlength="2000"
+          placeholder="Type a message…"
+          disabled
+          autocomplete="off"
+        />
+        <button type="submit" class="btn btn-primary" id="send-btn" disabled>Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
