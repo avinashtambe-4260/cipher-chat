@@ -122,23 +122,25 @@
     const pending = [...myPending.values()].filter((m) => !m.delivered).length;
     if (isPeerLive()) {
       if (pending > 0) {
-        setStatus("Live · " + pending + " queued", "is-ready");
+        setStatus("Connected · " + pending + " pending", "is-ready");
       } else {
-        setStatus("Synced", "is-ready");
+        setStatus("Connected", "is-ready");
       }
       return;
     }
     if (!mailboxOk) {
-      setStatus("Remote unreachable", "is-error");
+      setStatus("Mailbox unreachable", "is-error");
       return;
     }
     if (pending > 0) {
       setStatus(
-        pending === 1 ? "1 comment queued" : pending + " comments queued",
+        pending === 1
+          ? "Waiting — 1 message saved"
+          : "Waiting — " + pending + " messages saved",
         "is-waiting"
       );
     } else {
-      setStatus("Ready", "is-waiting");
+      setStatus("Waiting for peer — you can send now", "is-waiting");
     }
   }
 
@@ -235,9 +237,9 @@
       const meta = document.createElement("span");
       meta.className = "msg-meta";
       if (kind === "mine") {
-        meta.textContent = options.pending ? "you · pending" : "you";
+        meta.textContent = options.pending ? "You · waiting" : "You · delivered";
       } else {
-        meta.textContent = "collaborator";
+        meta.textContent = "Peer";
       }
       el.appendChild(meta);
       const body = document.createElement("span");
@@ -264,7 +266,7 @@
       if (el) {
         el.classList.remove("is-pending");
         const meta = el.querySelector(".msg-meta");
-        if (meta) meta.textContent = "you";
+        if (meta) meta.textContent = "You · delivered";
       }
     });
     refreshStatus();
@@ -340,7 +342,7 @@
           toAck.push(msg.id);
         } catch (err) {
           console.error(err);
-          appendMessage("Could not decrypt a remote note.", "system");
+          appendMessage("Could not decrypt a mailbox message.", "system");
           toAck.push(msg.id);
         }
       }
@@ -425,7 +427,7 @@
         mailboxAck([id]).catch(function () {});
       } catch (err) {
         console.error(err);
-        appendMessage("Could not decrypt a note.", "system");
+        appendMessage("Could not decrypt a message.", "system");
       }
     }
   }
@@ -441,7 +443,7 @@
     conn = c;
 
     c.on("open", () => {
-      appendMessage("Live sync connected.", "system");
+      appendMessage("Connected — live link ready.", "system");
       refreshStatus();
     });
 
@@ -451,7 +453,7 @@
 
     c.on("close", () => {
       conn = null;
-      appendMessage("Live sync paused — remote queue still active.", "system");
+      appendMessage("Peer left. New messages will wait in the mailbox.", "system");
       refreshStatus();
     });
 
@@ -493,8 +495,9 @@
     clearMessages();
     chatEl.hidden = true;
     gateEl.hidden = false;
+    document.body.classList.remove("in-room");
     showGateError("");
-    setStatus("Syncing…", "is-waiting");
+    setStatus("Connecting…", "is-waiting");
     joinBtn.disabled = false;
     roomCodeInput.focus();
     destroyed = false;
@@ -615,11 +618,15 @@
 
     gateEl.hidden = true;
     chatEl.hidden = false;
+    document.body.classList.add("in-room");
     chatTitle.textContent = code;
     clearMessages();
     setComposerEnabled(false);
     showGateError("");
-    appendMessage("Access granted. Comments stay private to this gist.", "system");
+    appendMessage(
+      "You're in. Send anytime — they’ll see it when they open this code.",
+      "system"
+    );
     syncViewport();
 
     startPolling();
@@ -676,7 +683,7 @@
       } catch (err) {
         console.error(err);
         mailboxOk = false;
-        appendMessage("Could not reach remote. Comment kept locally for now.", "system");
+        appendMessage("Could not reach mailbox. Kept locally for now.", "system");
       }
 
       // Fast path if peer is live
@@ -684,7 +691,7 @@
       refreshStatus();
     } catch (err) {
       console.error(err);
-      appendMessage("Failed to publish comment.", "system");
+      appendMessage("Failed to send encrypted message.", "system");
     }
   });
 
@@ -696,8 +703,9 @@
     }, 300);
   });
 
+  // Enter sends (single-line input)
   messageInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.key === "Enter") {
       e.preventDefault();
       if (typeof sendForm.requestSubmit === "function") sendForm.requestSubmit();
       else sendForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));

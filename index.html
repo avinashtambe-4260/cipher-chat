@@ -8,13 +8,13 @@
   <title>Private gist · Access required</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=gist-v1" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=gist-chat-v2" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="topbar">
+  <header id="topbar" class="topbar">
     <div class="topbar-inner">
       <a class="mark" href="./" aria-label="Home">
         <svg class="mark-icon" viewBox="0 0 16 16" width="32" height="32" aria-hidden="true">
@@ -30,7 +30,7 @@
   </header>
 
   <main id="main" class="shell">
-    <!-- Access gate -->
+    <!-- Access gate (GitHub-style) -->
     <section id="gate" class="gate" aria-labelledby="access-title">
       <div class="access-card">
         <div class="access-icon" aria-hidden="true">
@@ -40,10 +40,7 @@
           </svg>
         </div>
         <h1 id="access-title" class="access-title">This is a private gist</h1>
-        <p class="access-lede">
-          Enter the access code shared with you to view this gist.
-          Codes are case-insensitive and must begin with <code class="inline-code">14</code>.
-        </p>
+        <p class="access-lede">Enter the access code shared with you to view this gist.</p>
 
         <form id="join-form" class="access-form" autocomplete="off">
           <div class="field">
@@ -58,10 +55,10 @@
               autocomplete="off"
               minlength="4"
               required
-              placeholder="14········"
+              placeholder="Enter access code"
               aria-describedby="code-hint"
             />
-            <p id="code-hint" class="hint">Format: starts with <strong>14</strong>, then your shared secret.</p>
+            <p id="code-hint" class="hint">Ask the owner if you don’t have a code.</p>
           </div>
           <p id="gate-error" class="error flash" role="alert" hidden></p>
           <button type="submit" class="btn btn-primary" id="join-btn">View gist</button>
@@ -74,63 +71,48 @@
       </div>
     </section>
 
-    <!-- Gist workspace (thread) -->
-    <section id="chat" class="workspace" hidden aria-labelledby="chat-title">
-      <header class="gist-header">
-        <div class="gist-header-text">
-          <p class="gist-eyebrow">Private gist</p>
-          <h2 id="chat-title" class="gist-name">untitled</h2>
-          <p class="gist-path">
-            <span class="file-badge">secret.md</span>
-            <span id="status" class="sync-pill" role="status" aria-live="polite">Syncing…</span>
-          </p>
-        </div>
-        <button type="button" class="btn btn-ghost" id="leave-btn">Sign out</button>
-      </header>
-
-      <div class="gist-body">
-        <aside class="file-panel" aria-hidden="true">
-          <div class="file-panel-head">Files</div>
-          <div class="file-row is-active">secret.md</div>
-        </aside>
-
-        <div class="thread-panel">
-          <div class="thread-toolbar">
-            <span>Discussion</span>
-            <span class="muted tiny">Encrypted · collaborators only</span>
+    <!-- Chat (original Cipher room UI) -->
+    <section id="chat" class="chat" hidden aria-labelledby="chat-title">
+      <div class="atmosphere" aria-hidden="true"></div>
+      <div class="chat-shell">
+        <header class="chat-header">
+          <div class="chat-header-text">
+            <p class="brand brand-sm">Cipher</p>
+            <h2 id="chat-title" class="room-label">Room</h2>
           </div>
+          <div class="chat-meta">
+            <p id="status" class="status" role="status" aria-live="polite">Connecting…</p>
+            <button type="button" class="btn btn-ghost" id="leave-btn">Leave</button>
+          </div>
+        </header>
 
-          <div
-            id="messages"
-            class="thread"
-            role="log"
-            aria-live="polite"
-            aria-relevant="additions"
-            aria-label="Gist discussion"
-          ></div>
+        <div
+          id="messages"
+          class="messages"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Chat messages"
+        ></div>
 
-          <form id="send-form" class="composer" autocomplete="off">
-            <label class="visually-hidden" for="message-input">Add a comment</label>
-            <textarea
-              id="message-input"
-              name="message"
-              rows="2"
-              maxlength="2000"
-              placeholder="Leave a comment on this gist…"
-              disabled
-              autocomplete="off"
-            ></textarea>
-            <div class="composer-actions">
-              <span class="composer-hint muted tiny">Markdown supported · private</span>
-              <button type="submit" class="btn btn-primary" id="send-btn" disabled>Comment</button>
-            </div>
-          </form>
-        </div>
+        <form id="send-form" class="send-form" autocomplete="off">
+          <label class="visually-hidden" for="message-input">Message</label>
+          <input
+            id="message-input"
+            name="message"
+            type="text"
+            maxlength="2000"
+            placeholder="Type a message…"
+            disabled
+            autocomplete="off"
+          />
+          <button type="submit" class="btn btn-primary" id="send-btn" disabled>Send</button>
+        </form>
       </div>
     </section>
   </main>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="app.js?v=gist-v1"></script>
+  <script src="app.js?v=gist-chat-v2"></script>
 </body>
 </html>
