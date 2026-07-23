@@ -73,17 +73,52 @@
     });
   }
 
-  function syncViewport() {
-    const vv = window.visualViewport;
-    const height = vv
-      ? Math.max(220, Math.round(vv.height))
-      : Math.round(window.innerHeight || document.documentElement.clientHeight);
-    const top = vv ? Math.round(vv.offsetTop) : 0;
-
+  function applyChatFrame(top, height) {
     document.documentElement.style.setProperty("--app-height", height + "px");
     document.documentElement.style.setProperty("--vv-top", top + "px");
 
+    if (chatEl.hidden) {
+      chatEl.style.top = "";
+      chatEl.style.bottom = "";
+      chatEl.style.height = "";
+      chatEl.style.transform = "";
+      return;
+    }
+
+    // Pin chat exactly to the visual viewport (works with iOS Safari chrome)
+    const layoutH = window.innerHeight || height;
+    const bottom = Math.max(0, Math.round(layoutH - top - height));
+    chatEl.style.top = top + "px";
+    chatEl.style.bottom = bottom + "px";
+    chatEl.style.height = "auto";
+    chatEl.style.transform = "translateZ(0)";
+  }
+
+  function syncViewport() {
+    const vv = window.visualViewport;
+    let top = 0;
+    let height = Math.round(
+      window.innerHeight || document.documentElement.clientHeight || 600
+    );
+
+    if (vv) {
+      top = Math.max(0, Math.round(vv.offsetTop));
+      height = Math.max(200, Math.round(vv.height));
+    }
+
+    applyChatFrame(top, height);
+
     if (!chatEl.hidden && stickToBottom) scrollThreadToEnd(true);
+  }
+
+  function syncViewportSoon() {
+    syncViewport();
+    window.requestAnimationFrame(() => {
+      syncViewport();
+      window.setTimeout(syncViewport, 50);
+      window.setTimeout(syncViewport, 250);
+      window.setTimeout(syncViewport, 450);
+    });
   }
 
   function uuid() {
@@ -636,7 +671,7 @@
       "You're in. Send anytime — they’ll see it when they open this code.",
       "system"
     );
-    syncViewport();
+    syncViewportSoon();
 
     stickToBottom = true;
     startPolling();
@@ -706,11 +741,13 @@
   });
 
   messageInput.addEventListener("focus", () => {
-    syncViewport();
-    window.setTimeout(() => {
-      syncViewport();
-      scrollThreadToEnd(true);
-    }, 300);
+    stickToBottom = true;
+    syncViewportSoon();
+    window.setTimeout(() => scrollThreadToEnd(true), 350);
+  });
+
+  messageInput.addEventListener("blur", () => {
+    syncViewportSoon();
   });
 
   messagesEl.addEventListener(
@@ -735,6 +772,7 @@
     window.visualViewport.addEventListener("scroll", syncViewport);
   }
   window.addEventListener("resize", syncViewport);
+  window.addEventListener("orientationchange", syncViewportSoon);
   syncViewport();
 
   window.addEventListener("beforeunload", () => {
