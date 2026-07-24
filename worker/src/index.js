@@ -1,6 +1,6 @@
 ﻿/**
- * Cipher mailbox Worker — single inbox document per room (avoids KV list lag).
- * Only ciphertext is stored; deleted after ACK. TTL 24h.
+ * Mailbox Worker — encrypted messages until another DEVICE acks them.
+ * Same-device readers (e.g. normal + incognito) can view but cannot clear / confirm delivery.
  */
 
 const CORS = {
@@ -10,6 +10,7 @@ const CORS = {
 };
 
 const ROOM_HASH_RE = /^[0-9a-f]{64}$/i;
+const DEVICE_RE = /^[0-9a-f]{16,64}$/i;
 const MAX_BODY = 8 * 1024;
 const MSG_TTL = 86400;
 const MAX_MESSAGES = 100;
@@ -52,7 +53,7 @@ export default {
     if (path.endsWith("/") && path.length > 1) path = path.slice(0, -1);
 
     if (path === "/api/health" && request.method === "GET") {
-      return json({ ok: true, storage: "inbox-v2" });
+      return json({ ok: true, storage: "inbox-v3-device" });
     }
 
     const roomMatch = path.match(/^\/api\/room\/([^/]+)\/(messages|ack)$/);
@@ -126,12 +127,15 @@ async function postMessage(request, env, roomHash) {
     return badRequest("invalid JSON");
   }
 
-  const { id, iv, ct, from, ts } = body ?? {};
+  const { id, iv, ct, from, fromDevice, ts } = body ?? {};
   if (typeof id !== "string" || id.length === 0) {
     return badRequest("id required");
   }
   if (typeof iv !== "string" || typeof ct !== "string" || typeof from !== "string") {
     return badRequest("iv, ct, from must be strings");
+  }
+  if (typeof fromDevice !== "string" || !DEVICE_RE.test(fromDevice)) {
+    return badRequest("fromDevice required");
   }
 
   const entry = {
@@ -139,11 +143,10 @@ async function postMessage(request, env, roomHash) {
     iv,
     ct,
     from,
+    fromDevice,
     ts: ts == null ? Date.now() : ts,
   };
 
-  // Retry read-modify-write. Merge by id so a concurrent ACK can't be
-  // undone by a stale POST that re-appends already-removed messages.
   for (let attempt = 0; attempt < 8; attempt++) {
     const current = await readInbox(env, roomHash);
     const byId = new Map();
@@ -186,28 +189,53 @@ async function ackMessages(request, env, roomHash) {
   }
 
   const ids = body && body.ids;
+  const readerDevice = body && body.readerDevice;
   if (!Array.isArray(ids)) {
     return badRequest("ids must be an array");
+  }
+  if (typeof readerDevice !== "string" || !DEVICE_RE.test(readerDevice)) {
+    return badRequest("readerDevice required");
   }
 
   const idSet = new Set(
     ids.filter((id) => typeof id === "string" && id.length > 0)
   );
   if (!idSet.size) {
-    return json({ ok: true, deleted: 0 });
+    return json({ ok: true, deleted: 0, ignored: 0 });
   }
 
   for (let attempt = 0; attempt < 8; attempt++) {
     const current = await readInbox(env, roomHash);
-    const next = current.filter((m) => m && !idSet.has(m.id));
-    const deleted = current.length - next.length;
+    let deleted = 0;
+    let ignored = 0;
+    const next = [];
+
+    for (const m of current) {
+      if (!m || !idSet.has(m.id)) {
+        next.push(m);
+        continue;
+      }
+      // Only a different device can confirm delivery / remove the message
+      if (m.fromDevice && m.fromDevice === readerDevice) {
+        ignored += 1;
+        next.push(m);
+        continue;
+      }
+      deleted += 1;
+    }
+
     await writeInbox(env, roomHash, next);
     const verify = await readInbox(env, roomHash);
-    const stillThere = verify.some((m) => m && idSet.has(m.id));
-    if (!stillThere) {
-      return json({ ok: true, deleted });
+    const stillRemovable = verify.some(
+      (m) =>
+        m &&
+        idSet.has(m.id) &&
+        !(m.fromDevice && m.fromDevice === readerDevice)
+    );
+    if (!stillRemovable) {
+      return json({ ok: true, deleted, ignored });
     }
   }
 
-  return json({ ok: true, deleted: 0, warning: "ack may still be propagating" });
+  return json({ ok: true, deleted: 0, ignored: 0, warning: "ack may still be propagating" });
 }

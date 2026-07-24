@@ -36,6 +36,7 @@
   let roomCode = "";
   let roomHash = "";
   let clientId = "";
+  let deviceKey = "";
   let destroyed = false;
   let guestRetryTimer = null;
   let pollTimer = null;
@@ -119,6 +120,30 @@
       window.setTimeout(syncViewport, 250);
       window.setTimeout(syncViewport, 450);
     });
+  }
+
+  async function computeDeviceKey() {
+    const raw = [
+      navigator.userAgent || "",
+      String(screen.width || 0),
+      String(screen.height || 0),
+      String(screen.availWidth || 0),
+      String(screen.availHeight || 0),
+      String(screen.colorDepth || 0),
+      String(window.devicePixelRatio || 1),
+      navigator.language || "",
+      (navigator.languages || []).join(","),
+      (Intl.DateTimeFormat().resolvedOptions().timeZone || ""),
+      String(navigator.hardwareConcurrency || 0),
+      navigator.platform || "",
+      String(navigator.maxTouchPoints || 0),
+    ].join("|");
+    // Short stable id (enough entropy for this use, fits worker checks)
+    return (await sha256Hex(raw)).slice(0, 32);
+  }
+
+  function isOtherDevice(deviceId) {
+    return !!(deviceId && deviceKey && deviceId !== deviceKey);
   }
 
   function uuid() {
@@ -254,6 +279,7 @@
       id: uuid(),
       iv: b64Encode(iv),
       ct: b64Encode(cipher),
+      fromDevice: deviceKey,
     };
   }
 
@@ -338,17 +364,18 @@
         iv: payload.iv,
         ct: payload.ct,
         from: clientId,
+        fromDevice: deviceKey,
         ts: Date.now(),
       }),
     });
   }
 
   async function mailboxAck(ids) {
-    if (!ids.length) return;
+    if (!ids.length || !deviceKey) return;
     await mailboxFetch("/api/room/" + roomHash + "/ack", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: ids }),
+      body: JSON.stringify({ ids: ids, readerDevice: deviceKey }),
     });
   }
 
@@ -357,7 +384,7 @@
   }
 
   async function pollMailbox() {
-    if (destroyed || !roomHash || !cryptoKey) return;
+    if (destroyed || !roomHash || !cryptoKey || !deviceKey) return;
     try {
       const data = await mailboxList();
       mailboxOk = true;
@@ -369,11 +396,26 @@
         const msg = messages[i];
         if (!msg || !msg.id) continue;
 
-        if (msg.from === clientId) {
-          stillMine.add(msg.id);
+        const sameDevice = msg.fromDevice && msg.fromDevice === deviceKey;
+
+        if (sameDevice) {
+          if (msg.from === clientId) {
+            // My message on this device — waiting until another device acks
+            stillMine.add(msg.id);
+          } else if (!seenIncoming.has(msg.id)) {
+            // Same phone/browser-family, other profile — show, but do not confirm delivery
+            try {
+              const text = await decryptPayload(msg);
+              seenIncoming.add(msg.id);
+              appendMessage(text, "theirs", { id: msg.id });
+            } catch (err) {
+              console.error(err);
+            }
+          }
           continue;
         }
 
+        // Message from another device
         if (seenIncoming.has(msg.id)) {
           toAck.push(msg.id);
           continue;
@@ -391,7 +433,7 @@
         }
       }
 
-      // My messages no longer in mailbox → peer read them
+      // Removed from mailbox only after another device acked → delivered
       const deliveredIds = [];
       myPending.forEach((entry, id) => {
         if (!entry.delivered && !stillMine.has(id)) {
@@ -463,25 +505,29 @@
     if (!packet || packet.v !== 1) return;
 
     if (packet.type === "ack" && Array.isArray(packet.ids)) {
-      markMineDelivered(packet.ids);
-      // Clear from mailbox so they don't linger / get resurrected by races
-      mailboxAck(packet.ids).catch(function () {});
+      // Only another device can mark our messages delivered
+      if (isOtherDevice(packet.readerDevice)) {
+        markMineDelivered(packet.ids);
+        mailboxAck(packet.ids).catch(function () {});
+      }
       return;
     }
 
     if (packet.type === "msg" || (packet.iv && packet.ct)) {
       const id = packet.id || uuid();
       if (seenIncoming.has(id)) {
-        sendPacket({ v: 1, type: "ack", ids: [id] });
+        sendPacket({ v: 1, type: "ack", ids: [id], readerDevice: deviceKey });
         return;
       }
       try {
         const text = await decryptPayload(packet);
         seenIncoming.add(id);
         appendMessage(text, "theirs", { id: id });
-        sendPacket({ v: 1, type: "ack", ids: [id] });
-        // Also remove from mailbox if present
-        mailboxAck([id]).catch(function () {});
+        sendPacket({ v: 1, type: "ack", ids: [id], readerDevice: deviceKey });
+        // Mailbox clear only counts from a different device
+        if (isOtherDevice(packet.fromDevice)) {
+          mailboxAck([id]).catch(function () {});
+        }
       } catch (err) {
         console.error(err);
         appendMessage("Could not decrypt a message.", "system");
@@ -557,6 +603,7 @@
     cryptoKey = null;
     roomCode = "";
     roomHash = "";
+    deviceKey = "";
     myPending.clear();
     seenIncoming.clear();
     clearMessages();
@@ -676,6 +723,7 @@
     destroyed = false;
     roomCode = code;
     clientId = getClientId();
+    deviceKey = await computeDeviceKey();
     roomHash = await sha256Hex("cipher-room:" + code);
     cryptoKey = await deriveAesKey(code);
     const hostId = await deriveHostPeerId(code);
